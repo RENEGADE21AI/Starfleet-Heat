@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Sky Raid Dynamic Plus v6.31</title>
+<title>Sky Raid Dynamic Plus v6.37</title>
 <style>
   html, body {
     margin: 0;
@@ -25,7 +25,6 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 let W = 0, H = 0;
-let activePointerId = null;
 let devSkipCooldown = 0;
 const DEV_SKIP_COOLDOWN_FRAMES = 48;
 const MAX_PARTICLES = 900;
@@ -237,7 +236,10 @@ const state = {
     heatStreak: false,
     lastHitFrame: -999,
     killStreak: 0,
-    burst: 0
+    burst: 0,
+    shotsFired: 0,
+    shotsHit: 0,
+    pacingMemory: 0
   },
   keyboard: { up: false, down: false, left: false, right: false },
   joystick: { active: false, id: null, cx: 0, cy: 0, ax: 0, ay: 0, radius: 56 },
@@ -249,6 +251,9 @@ const state = {
   lastBossMode: null,
   intensityPhase: "normal",
   intensityTimer: 180,
+  waveMood: "open",
+  waveMoodTimer: 120,
+  lastWaveTemplateName: null,
   gameState: "start"
 };
 
@@ -358,10 +363,10 @@ function spawnRapidFireMuzzleParticles(x, y) {
     state.particles.push({
       x: x + rand(-1.1, 1.1),
       y: y + rand(-0.8, 0.8),
-      vx: rand(-0.45, 0.45),
-      vy: rand(-1.2, -0.35),
-      life: rand(10, 16),
-      size: rand(1.8, 3.0),
+      vx: rand(-0.55, 0.55),
+      vy: rand(-1.3, -0.35),
+      life: rand(12, 18),
+      size: rand(1.6, 2.8),
       color: "#fff"
     });
   }
@@ -423,6 +428,7 @@ function registerPowerupDrop(cooldownMin = 240, cooldownMax = 360) {
 
 function shouldDropPowerupNow() {
   if (state.powerupDropCooldown > 0) return false;
+  if (state.killsSinceLastDrop >= 12) return true;
   if (state.framesSinceLastDrop >= 900) return true;
 
   const drought = clamp((state.framesSinceLastDrop - 240) / 660, 0, 1);
@@ -623,6 +629,12 @@ function rhythmProfile() {
   return { pressure: 12, interval: -16 };
 }
 
+function phaseArcBias() {
+  const dur = Math.max(1, phaseDuration(state.phase));
+  const progress = clamp(state.phaseTimer / dur, 0, 1);
+  return Math.sin(progress * TAU - Math.PI / 2);
+}
+
 function peakLoad() {
   const enemyLoad = Math.max(0, state.enemies.length - 8) / 14;
   const bulletLoad = Math.max(0, enemyBulletPressure() - enemyBulletBudget()) / 8;
@@ -645,6 +657,9 @@ function triggerPhaseSkip() {
   state.bossRecovery = 0;
   state.waveRest = 24;
   state.playerRealm = 0;
+  state.waveMood = "open";
+  state.waveMoodTimer = 120;
+  state.lastWaveTemplateName = null;
 
   state.phase++;
   state.phaseTimer = 0;
@@ -733,6 +748,76 @@ function updatePressure() {
   state.pressure += (target - state.pressure) * 0.04;
 }
 
+function updatePacingMemory() {
+  const d = state.difficulty;
+  const p = state.player;
+  const sinceHit = state.frame - d.lastHitFrame;
+
+  if (state.boss || state.bossDeath) {
+    d.pacingMemory *= 0.994;
+  } else {
+    const comfortable = sinceHit > 840 && p.hp === p.maxHp && state.pressure < 48;
+    const stressed = p.hp <= 2 || state.pressure > 72 || d.grace > 0 || d.ghostGrace > 0;
+
+    if (comfortable) d.pacingMemory = clamp(d.pacingMemory + 0.006, -1, 1);
+    else if (stressed) d.pacingMemory = clamp(d.pacingMemory - 0.008, -1, 1);
+    else d.pacingMemory *= 0.996;
+  }
+
+  if (state.frame > 0 && state.frame % 240 === 0) {
+    d.shotsFired = Math.floor(d.shotsFired * 0.72);
+    d.shotsHit = Math.floor(d.shotsHit * 0.72);
+  }
+}
+
+function updateWaveMood() {
+  if (state.boss || state.bossDeath) {
+    state.waveMood = "boss";
+    state.waveMoodTimer = 0;
+    return;
+  }
+
+  if (state.waveMoodTimer > 0) {
+    state.waveMoodTimer--;
+    if (state.waveMoodTimer > 24) return;
+  }
+
+  const d = state.difficulty;
+  const p = state.player;
+  const sinceHit = state.frame - d.lastHitFrame;
+  const arc = phaseArcBias();
+  const early = state.phase <= 2;
+  const recoveryNeed = p.hp <= 2 || state.pressure > 72 || d.grace > 0 || d.ghostGrace > 0 || d.pacingMemory < -0.35;
+  let next;
+
+  if (state.phase === 1) {
+    if (recoveryNeed || arc < -0.15) next = "open";
+    else next = Math.random() < 0.55 ? "open" : "recovery";
+  } else if (early) {
+    if (recoveryNeed || arc < -0.20) next = "open";
+    else if (arc > 0.42 && state.phaseTimer > 160) next = Math.random() < 0.55 ? "spike" : "open";
+    else next = Math.random() < 0.70 ? "open" : "recovery";
+  } else {
+    if (recoveryNeed) next = Math.random() < 0.72 ? "recovery" : "open";
+    else if (arc > 0.48 || state.intensityPhase === "surge") next = Math.random() < 0.66 ? "spike" : (state.phase >= 5 && Math.random() < 0.4 ? "rule" : "open");
+    else if (arc < -0.38) next = Math.random() < 0.66 ? "open" : "recovery";
+    else if (sinceHit > 840 && p.hp === p.maxHp && state.pressure < 48) next = Math.random() < 0.55 ? "spike" : "rule";
+    else if (d.pacingMemory > 0.35) next = Math.random() < 0.60 ? "spike" : "rule";
+    else if (d.pacingMemory < -0.25) next = Math.random() < 0.58 ? "recovery" : "open";
+    else {
+      const roll = Math.random();
+      next = roll < 0.40 ? "open" : roll < 0.68 ? "spike" : roll < 0.86 ? "recovery" : "rule";
+    }
+  }
+
+  state.waveMood = next;
+  state.waveMoodTimer =
+    next === "spike" ? 84 + Math.floor(rand(0, 42)) :
+    next === "recovery" ? 116 + Math.floor(rand(0, 60)) :
+    next === "rule" ? 92 + Math.floor(rand(0, 54)) :
+    100 + Math.floor(rand(0, 50));
+}
+
 function updateDifficulty() {
   const d = state.difficulty;
   const p = state.player;
@@ -759,24 +844,42 @@ function updateDifficulty() {
   if (d.ghostGrace > 0) target -= 0.07;
   if (d.heatStreak) target -= 0.12;
 
+  const accuracy = d.shotsFired > 0 ? d.shotsHit / d.shotsFired : 0.5;
+  const accuracyBoost = clamp((accuracy - 0.38) * 0.16, 0, 0.10);
+  target += accuracyBoost;
+
   const killBonus = sinceHit > 900 ? 0.10 : clamp(d.killStreak * 0.0025, 0, 0.08);
   target += killBonus;
 
+  if (d.pacingMemory > 0.45) target += 0.08;
+  else if (d.pacingMemory < -0.45) target -= 0.06;
+
+  target += phaseArcBias() * 0.05;
   target -= clamp(d.burst, 0, 3) * 0.03;
-  target += (state.pressure - 50) / 180;
+  target += (state.pressure - 50) / 200;
   if (activePhantomCount() > 0) target -= 0.06;
+
+  if (state.waveMood === "open") target -= 0.02;
+  else if (state.waveMood === "recovery") target -= 0.08;
+  else if (state.waveMood === "spike") target += 0.03;
+  else if (state.waveMood === "rule") target += 0.01;
 
   if (state.intensityPhase === "surge") target += 0.06;
   if (state.intensityPhase === "cooldown") target -= 0.05;
 
-  d.target = clamp(target, 0.70, 1.40);
+  if (state.phase >= 5 && sinceHit > 900 && p.hp === p.maxHp && state.waveMood !== "recovery") {
+    target += 0.06;
+  }
+
+  d.target = clamp(target, 0.70, 1.45);
 
   let lerp = 0.025;
   if (p.hp === 1) lerp = 0.06;
-  else if (p.hp === p.maxHp && d.killStreak > 0) lerp = 0.03;
+  else if (p.hp === p.maxHp && (d.killStreak > 0 || d.pacingMemory > 0.25 || accuracy > 0.6)) lerp = 0.03;
+  else if (state.pressure > 70 || d.pacingMemory < -0.35) lerp = 0.04;
 
   d.threat += (d.target - d.threat) * lerp;
-  d.threat = clamp(d.threat, 0.70, 1.40);
+  d.threat = clamp(d.threat, 0.70, 1.45);
 
   if (d.grace > 0) d.grace--;
   if (d.ghostGrace > 0) d.ghostGrace--;
@@ -799,29 +902,11 @@ function fireEnemyBullet(x, y, vx, vy, kind = "purple", extra = {}) {
     life: 240,
     r: 4,
     nearMissed: false,
-    damage: 1
+    damage: 1,
+    seed: extra.seed ?? null,
+    maxSpeed: extra.maxSpeed ?? null
   });
   state.difficulty.burst = clamp(state.difficulty.burst + 0.12, 0, 3);
-}
-
-function fireBossBullet(x, y, angle, speed, kind = "boss", damage = 1, life = 240) {
-  const cost = enemyBulletCost(kind);
-  if (state.enemyBullets.length >= 44) return;
-  if (!canSpendBulletBudget(cost)) return;
-  spendBulletBudget(cost);
-  state.enemyBullets.push({
-    x,
-    y,
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
-    kind,
-    life,
-    r: kind === "boss" ? 5 : 4,
-    nearMissed: false,
-    damage,
-    age: 0,
-    trail: []
-  });
 }
 
 function phantomFrontArcOK(e, tx, ty) {
@@ -981,23 +1066,67 @@ const waveTemplates = {
   phantomFan: waveTemplatePhantomFan
 };
 
+function pickWeightedTemplate(pool, avoidName = null) {
+  const filtered = avoidName ? pool.filter(([name]) => name !== avoidName) : pool.slice();
+  const list = filtered.length > 0 ? filtered : pool.slice();
+  const total = list.reduce((sum, item) => sum + item[1], 0);
+  let roll = Math.random() * total;
+  for (const [name, weight] of list) {
+    roll -= weight;
+    if (roll <= 0) return name;
+  }
+  return list[list.length - 1][0];
+}
+
 function selectWaveTemplate() {
-  if (state.phase >= 5 && Math.random() < 0.08) {
-    const phantomPool = ["phantomProbe", "phantomPair", "phantomFan"];
-    const name = phantomPool[Math.floor(Math.random() * phantomPool.length)];
-    return { name, fn: waveTemplates[name] };
+  const mood = state.waveMood || "open";
+  const phaseTier = state.phase < 4 ? "early" : state.phase < 9 ? "mid" : "late";
+  let pool;
+
+  if (state.phase === 1) {
+    if (mood === "recovery") pool = [["breather", 8], ["redV", 4], ["redWall", 3]];
+    else if (mood === "spike") pool = [["redWall", 5], ["redV", 4], ["breather", 2]];
+    else if (mood === "rule") pool = [["redV", 5], ["redWall", 4], ["breather", 2]];
+    else pool = [["breather", 5], ["redV", 4], ["redWall", 4]];
+  } else if (mood === "recovery") {
+    pool = phaseTier === "early"
+      ? [["breather", 6], ["redV", 3], ["orangePair", 4], ["staggerMix", 2]]
+      : phaseTier === "mid"
+      ? [["breather", 4], ["redV", 3], ["orangePair", 4], ["staggerMix", 3], ["mixedChevron", 2]]
+      : [["breather", 3], ["redV", 2], ["orangePair", 3], ["staggerMix", 2], ["mixedChevron", 2], ["orangeSlash", 1]];
+  } else if (mood === "spike") {
+    pool = phaseTier === "early"
+      ? [["redWall", 4], ["staggerMix", 3], ["mixedChevron", 3], ["orangeChain", 2]]
+      : phaseTier === "mid"
+      ? [["redWall", 4], ["mixedChevron", 3], ["orangeRibbon", 2], ["purpleGuard", 3], ["splitAmbush", 3], ["orangeSlash", 2]]
+      : [["redWall", 3], ["orangeRibbon", 3], ["purpleGuard", 4], ["splitAmbush", 4], ["orangeChain", 2], ["orangeSlash", 3]];
+  } else if (mood === "rule") {
+    if (state.phase >= 5) {
+      pool = phaseTier === "early"
+        ? [["phantomProbe", 5], ["phantomPair", 4], ["breather", 2], ["mixedChevron", 2]]
+        : phaseTier === "mid"
+        ? [["phantomProbe", 4], ["phantomPair", 4], ["phantomFan", 3], ["mixedChevron", 2], ["purpleGuard", 2]]
+        : [["phantomProbe", 3], ["phantomPair", 4], ["phantomFan", 4], ["purpleGuard", 2], ["splitAmbush", 2]];
+    } else {
+      pool = phaseTier === "early"
+        ? [["mixedChevron", 4], ["orangePair", 4], ["staggerMix", 3], ["redV", 2]]
+        : phaseTier === "mid"
+        ? [["purpleGuard", 4], ["splitAmbush", 3], ["orangeChain", 3], ["mixedChevron", 2]]
+        : [["purpleGuard", 4], ["splitAmbush", 4], ["orangeRibbon", 3], ["orangeSlash", 2]];
+    }
+  } else {
+    pool = phaseTier === "early"
+      ? [["breather", 5], ["redV", 4], ["orangePair", 4], ["mixedChevron", 2]]
+      : phaseTier === "mid"
+      ? [["staggerMix", 4], ["orangePair", 4], ["mixedChevron", 4], ["orangeChain", 2], ["purpleGuard", 1]]
+      : [["orangeRibbon", 3], ["purpleGuard", 3], ["splitAmbush", 3], ["orangeChain", 3], ["orangeSlash", 2], ["mixedChevron", 2]];
+
+    if (state.phase >= 5) {
+      pool.push(["phantomProbe", 1], ["phantomPair", 1], ["phantomFan", 1]);
+    }
   }
 
-  const tier = clamp(Math.floor((state.phase - 1) / 2), 0, 2);
-  const pressure = clamp(Math.floor(state.pressure / 34), 0, 2);
-  const pools = [
-    ["breather", "redV", "redWall"],
-    ["staggerMix", "orangePair", "mixedChevron", "orangeChain", "redWall"],
-    ["orangeRibbon", "purpleGuard", "splitAmbush", "orangeChain", "orangeSlash", "mixedChevron"]
-  ];
-
-  let pool = pools[tier];
-  let name = pool[clamp(Math.floor((pressure / 2) + (state.waveIndex % 2)), 0, pool.length - 1)];
+  const name = pickWeightedTemplate(pool, state.lastWaveTemplateName);
   return { name, fn: waveTemplates[name] };
 }
 
@@ -1016,10 +1145,26 @@ function templateDensity(events) {
 function spawnWave() {
   const sel = selectWaveTemplate();
   const events = sel.fn ? sel.fn() : [];
+  state.lastWaveTemplateName = sel.name;
 
   state.pendingSpawns.push(...events);
 
   const density = templateDensity(events);
+
+  if (state.waveMood === "spike" && density < 4.8) {
+    const followName = Math.random() < 0.6 ? "mixedChevron" : "redWall";
+    const follow = waveTemplates[followName] ? waveTemplates[followName]() : [];
+    for (const ev of follow) ev.delay += 28 + Math.floor(rand(0, 18));
+    state.pendingSpawns.push(...follow);
+  }
+
+  if (state.waveMood === "rule" && state.phase >= 5 && density < 4.8) {
+    const followName = Math.random() < 0.5 ? "phantomPair" : "phantomFan";
+    const follow = waveTemplates[followName] ? waveTemplates[followName]() : [];
+    for (const ev of follow) ev.delay += 36 + Math.floor(rand(0, 20));
+    state.pendingSpawns.push(...follow);
+  }
+
   if (density >= 5.5) {
     const followName = Math.random() < 0.5 ? "breather" : "orangePair";
     const follow = waveTemplates[followName] ? waveTemplates[followName]() : [];
@@ -1030,10 +1175,19 @@ function spawnWave() {
     state.waveRest = Math.max(state.waveRest, 12 + Math.floor(rand(0, 8)));
   }
 
+  if (state.waveMood === "recovery") {
+    state.waveRest = Math.max(state.waveRest, 18 + Math.floor(rand(0, 12)));
+  } else if (state.waveMood === "spike") {
+    state.waveRest = Math.max(state.waveRest, 8 + Math.floor(rand(0, 8)));
+  } else if (state.waveMood === "rule") {
+    state.waveRest = Math.max(state.waveRest, 12 + Math.floor(rand(0, 8)));
+  }
+
   state.waveIndex++;
 }
 
 function spawnEnemy(type, x, y, extra = {}) {
+  if (type === "orange" && state.phase === 1) type = "red";
   if (type === "red") {
     const nearbyReds = state.enemies.filter(e => e.type === "red" && Math.abs(e.x - x) < 90 && Math.abs(e.y - y) < 110).length;
     if (nearbyReds >= 2 && Math.random() < 0.55) return;
@@ -1075,7 +1229,6 @@ function spawnEnemy(type, x, y, extra = {}) {
     driftPhase: rand(0, TAU),
     driftDir: Math.random() < 0.5 ? -1 : 1,
     driftPower: rand(0.06, 0.22),
-    flash: 0,
     hitFlash: 0,
     hitPulse: 0,
     entryFrames: 0
@@ -1209,8 +1362,10 @@ function firePlayer() {
     state.bullets.push({ x: p.x - 11, y: p.y - 14, vx: -2.3, vy: -8.6, life: 90, r: 3, kind, realm: state.playerRealm });
     state.bullets.push({ x: p.x, y: p.y - 16, vx: 0, vy: -9.0, life: 90, r: 3, kind, realm: state.playerRealm });
     state.bullets.push({ x: p.x + 11, y: p.y - 14, vx: 2.3, vy: -8.6, life: 90, r: 3, kind, realm: state.playerRealm });
+    state.difficulty.shotsFired += 3;
   } else {
     state.bullets.push({ x: p.x, y: p.y - 16, vx: 0, vy: -9.0, life: 90, r: 3, kind, realm: state.playerRealm });
+    state.difficulty.shotsFired += 1;
   }
 
   if (p.rapid > 0) spawnRapidFireMuzzleParticles(tipX, tipY);
@@ -1503,6 +1658,9 @@ function spawnWraithBoss() {
   state.playerRealm = 0;
   state.player.ghostTimer = 0;
   state.player.ghostCooldown = 0;
+  state.waveMood = "boss";
+  state.waveMoodTimer = 0;
+  state.lastWaveTemplateName = null;
   showMessage("WRAITH BOSS INCOMING... REALM HOP ACTIVATED", 150);
 }
 
@@ -1561,6 +1719,9 @@ function spawnBoss() {
     mouthOpen: 0
   };
   state.playerRealm = 0;
+  state.waveMood = "boss";
+  state.waveMoodTimer = 0;
+  state.lastWaveTemplateName = null;
   showMessage("BOSS INCOMING", 120);
 }
 
@@ -1602,6 +1763,9 @@ function spawnBossDeath(boss) {
   state.enemies = [];
   state.enemyBullets = [];
   state.pendingSpawns = [];
+  state.waveMood = "open";
+  state.waveMoodTimer = 120;
+  state.lastWaveTemplateName = null;
   spawnParticles(boss.x, boss.y, 50, "#fff", 1.1);
   spawnParticles(boss.x, boss.y, 24, "#9ff", 1.0);
   state.fx.shake = 14;
@@ -1843,7 +2007,6 @@ function updateEnemies() {
   for (const e of state.enemies) {
     e.prevX = e.x;
     e.prevY = e.y;
-    if (e.flash > 0) e.flash--;
     e.hitFlash = Math.max(0, (e.hitFlash || 0) - 1);
     e.hitPulse = Math.max(0, (e.hitPulse || 0) - 0.12);
 
@@ -2061,7 +2224,7 @@ function updateEnemies() {
               const d = Math.max(1, Math.hypot(dx, dy));
               const speed = 2.6 + state.phase * 0.03;
               if (phantomFrontArcOK(e, p.x, p.y)) {
-                fireEnemyBullet(e.x, e.y + 10, (dx / d) * speed, (dy / d) * speed, "phantomShot", { realm: 0 });
+                fireEnemyBullet(e.x, e.y + 10, (dx / d) * speed, (dy / d) * speed, "phantomShot", {});
                 e.fireTimer = Math.floor(120 + rand(-20, 20));
               } else {
                 e.fireTimer = 20;
@@ -2223,6 +2386,7 @@ function updateCollisions() {
       if (state.boss.mode === "wraith") {
         if ((b.realm == null || b.realm === state.playerRealm) && b.kind === (state.boss.realm === 0 ? "physical" : "ghost") && bossCollisionHits(b, state.boss)) {
           state.boss.hp--;
+          state.difficulty.shotsHit++;
           b.life = 0;
           p.energy = clamp(p.energy + 5, 0, p.maxEnergy);
           state.boss.hitsSinceShift++;
@@ -2235,6 +2399,9 @@ function updateCollisions() {
             bossRewardDrops(deadBoss.x, deadBoss.y);
             registerPowerupDrop(300, 480);
             state.boss = null;
+            state.waveMood = "open";
+            state.waveMoodTimer = 120;
+            state.lastWaveTemplateName = null;
             state.phase++;
             state.phaseTimer = 0;
             state.waveTimer = 0;
@@ -2252,6 +2419,7 @@ function updateCollisions() {
       } else if (state.boss.mode === "standard") {
         if (bossCollisionHits(b, state.boss)) {
           state.boss.hp--;
+          state.difficulty.shotsHit++;
           b.life = 0;
           spawnParticles(b.x, b.y, 4, "#fff", 0.8);
           if (state.boss.hp <= 0) {
@@ -2262,6 +2430,9 @@ function updateCollisions() {
             bossRewardDrops(deadBoss.x, deadBoss.y);
             registerPowerupDrop(300, 480);
             state.boss = null;
+            state.waveMood = "open";
+            state.waveMoodTimer = 120;
+            state.lastWaveTemplateName = null;
             state.phase++;
             state.phaseTimer = 0;
             state.waveTimer = 0;
@@ -2289,6 +2460,7 @@ function updateCollisions() {
 
       if (circleHit(b.x, b.y, b.r, e.x, e.y, e.r)) {
         b.life = 0;
+        state.difficulty.shotsHit++;
         e.hp--;
         applyEnemyHitFeedback(e);
         spawnParticles(b.x, b.y, 6, "#fff", 0.7);
@@ -2316,18 +2488,21 @@ function updateCollisions() {
 
     if (b.realm != null && b.realm !== state.playerRealm) continue;
 
-    let wingmanBlocked = false;
-    for (let w = state.wingmen.length - 1; w >= 0; w--) {
-      const wm = state.wingmen[w];
-      if (circleHit(b.x, b.y, b.r, wm.x, wm.y, 12)) {
-        state.enemyBullets.splice(i, 1);
-        state.wingmen.splice(w, 1);
-        spawnParticles(wm.x, wm.y, 10, "#f6f", 0.8);
-        wingmanBlocked = true;
-        break;
+    const wingmanProtected = p.ghostTimer > 0;
+    if (!wingmanProtected) {
+      let wingmanBlocked = false;
+      for (let w = state.wingmen.length - 1; w >= 0; w--) {
+        const wm = state.wingmen[w];
+        if (circleHit(b.x, b.y, b.r, wm.x, wm.y, 12)) {
+          state.enemyBullets.splice(i, 1);
+          state.wingmen.splice(w, 1);
+          spawnParticles(wm.x, wm.y, 10, "#f6f", 0.8);
+          wingmanBlocked = true;
+          break;
+        }
       }
+      if (wingmanBlocked) continue;
     }
-    if (wingmanBlocked) continue;
 
     if (state.boss && state.boss.mode === "wraith" && (b.kind === "wraithPhysical" || b.kind === "wraithGhost")) {
       if (circleHit(b.x, b.y, b.r, p.x, p.y, 14) && p.inv <= 0) {
@@ -2346,19 +2521,22 @@ function updateCollisions() {
   for (let i = state.enemies.length - 1; i >= 0; i--) {
     const e = state.enemies[i];
 
-    let wingmanHit = false;
-    for (let w = state.wingmen.length - 1; w >= 0; w--) {
-      const wm = state.wingmen[w];
-      if (circleHit(e.x, e.y, e.r, wm.x, wm.y, 12)) {
-        state.wingmen.splice(w, 1);
-        state.enemies.splice(i, 1);
-        spawnParticles(wm.x, wm.y, 12, "#f6f", 0.9);
-        spawnDeathBurst(e.x, e.y, 10);
-        wingmanHit = true;
-        break;
+    const wingmanProtected = p.ghostTimer > 0;
+    if (!wingmanProtected) {
+      let wingmanHit = false;
+      for (let w = state.wingmen.length - 1; w >= 0; w--) {
+        const wm = state.wingmen[w];
+        if (circleHit(e.x, e.y, e.r, wm.x, wm.y, 12)) {
+          state.wingmen.splice(w, 1);
+          state.enemies.splice(i, 1);
+          spawnParticles(wm.x, wm.y, 12, "#f6f", 0.9);
+          spawnDeathBurst(e.x, e.y, 10);
+          wingmanHit = true;
+          break;
+        }
       }
+      if (wingmanHit) continue;
     }
-    if (wingmanHit) continue;
 
     if (e.type === "phantom") {
       if (isWraithActive()) {
@@ -2401,6 +2579,8 @@ function updateWavesAndPhaseAndPressure() {
   if (state.bossRecovery > 0) {
     state.bossRecovery--;
     updatePressure();
+    updatePacingMemory();
+    updateWaveMood();
     state.threatScore = calculateThreatScore();
     updateDifficulty();
     state.cachedBulletPressure = enemyBulletPressure();
@@ -2422,9 +2602,19 @@ function updateWavesAndPhaseAndPressure() {
 
   const sinceHit = state.frame - state.difficulty.lastHitFrame;
   const strongPerformance = sinceHit > 720 && state.difficulty.killStreak >= 5 && !bossLocked;
+  const comfort = sinceHit > 840 && state.player.hp === state.player.maxHp && state.pressure < 48 && !bossLocked;
+
   if (strongPerformance) {
-    state.phaseTimer += 0.35;
-    state.waveTimer += 0.15;
+    state.phaseTimer += 0.25;
+    state.waveTimer += 0.10;
+  }
+  if (comfort) {
+    state.phaseTimer += 0.40;
+    state.waveTimer += 0.18;
+  }
+  if (state.difficulty.pacingMemory > 0.35) {
+    state.phaseTimer += 0.10;
+    state.waveTimer += 0.05;
   }
   if (state.intensityPhase === "surge") {
     state.phaseTimer += 0.10;
@@ -2432,6 +2622,9 @@ function updateWavesAndPhaseAndPressure() {
   }
 
   updatePressure();
+  updatePacingMemory();
+  updateWaveMood();
+
   state.threatScore = calculateThreatScore();
   updateDifficulty();
 
@@ -2449,6 +2642,9 @@ function updateWavesAndPhaseAndPressure() {
     state.phaseTimer = 0;
     state.waveTimer = 0;
     state.waveRest = 18;
+    state.waveMood = "open";
+    state.waveMoodTimer = 120;
+    state.lastWaveTemplateName = null;
     showMessage("PHASE " + state.phase, 100);
     saveMilestone();
     if (state.phase % 4 === 0) spawnBoss();
@@ -2460,6 +2656,13 @@ function updateWavesAndPhaseAndPressure() {
 
   const rhythm = rhythmProfile();
   baseInterval += rhythm.interval;
+
+  if (state.waveMood === "spike") baseInterval *= 0.82;
+  else if (state.waveMood === "recovery") baseInterval *= 1.22;
+  else if (state.waveMood === "rule") baseInterval *= 0.92;
+
+  if (state.difficulty.pacingMemory > 0.45) baseInterval *= 0.90;
+  if (state.difficulty.pacingMemory < -0.35) baseInterval *= 1.08;
 
   if (state.intensityPhase === "surge") baseInterval *= 0.78;
   if (state.intensityPhase === "cooldown") baseInterval *= 1.18;
@@ -2475,8 +2678,14 @@ function updateWavesAndPhaseAndPressure() {
   baseInterval += Math.round(load * 18);
   baseInterval += Math.round((state.pressure - 50) * 0.08);
 
-  const interval = Math.round(baseInterval / clamp(state.difficulty.threat, 0.75, 1.20));
-  const threatBudget = 11.5 + state.phase * 2.8 + (state.intensityPhase === "surge" ? 0.8 : state.intensityPhase === "cooldown" ? -0.8 : 0);
+  const interval = Math.round(baseInterval / clamp(state.difficulty.threat, 0.75, 1.25));
+
+  let threatBudget = 11.5 + state.phase * 2.8 + (state.intensityPhase === "surge" ? 0.8 : state.intensityPhase === "cooldown" ? -0.8 : 0);
+  if (state.waveMood === "spike") threatBudget += 1.2;
+  else if (state.waveMood === "recovery") threatBudget -= 1.2;
+  else if (state.waveMood === "rule") threatBudget += 0.5;
+  if (state.difficulty.pacingMemory > 0.45) threatBudget += 0.75;
+  if (state.difficulty.pacingMemory < -0.35) threatBudget -= 0.6;
 
   if (!state.boss && state.pendingSpawns.length === 0 && state.waveTimer >= interval && state.threatScore < threatBudget) {
     spawnWave();
@@ -2764,15 +2973,43 @@ function drawBullets() {
 
 function drawEnemyFlame(yOffset, width, height, phase, alpha = 0.42) {
   const flicker = 1 + Math.sin(state.frame * 0.35 + phase) * 0.18;
+  const sway = Math.sin(state.frame * 0.18 + phase * 0.7) * 0.8;
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = "rgba(255,165,90,0.55)";
+  ctx.fillStyle = "rgba(255,165,90,0.52)";
   ctx.beginPath();
   ctx.moveTo(-width / 2, yOffset);
   ctx.lineTo(0, yOffset + height * flicker);
   ctx.lineTo(width / 2, yOffset);
   ctx.closePath();
   ctx.fill();
+
+  ctx.globalAlpha = alpha * 0.74;
+  ctx.fillStyle = "rgba(255,220,140,0.70)";
+  ctx.beginPath();
+  ctx.moveTo(-width * 0.22, yOffset - 1);
+  ctx.lineTo(0, yOffset + height * 0.56 * flicker);
+  ctx.lineTo(width * 0.22, yOffset - 1);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.globalAlpha = alpha * 0.36;
+  ctx.fillStyle = "rgba(255,180,90,0.33)";
+  ctx.fillRect(-1, yOffset - 6, 2, height * 1.25);
+
+  ctx.globalAlpha = alpha * 0.25;
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.fillRect(-0.8, yOffset - 3, 1.6, height * 0.65);
+
+  ctx.globalAlpha = alpha * 0.24;
+  ctx.fillStyle = "rgba(255,165,90,0.22)";
+  ctx.beginPath();
+  ctx.moveTo(-width / 2 - 2, yOffset - 2 + sway);
+  ctx.lineTo(0, yOffset - 7 - sway);
+  ctx.lineTo(width / 2 + 2, yOffset - 2 + sway);
+  ctx.closePath();
+  ctx.fill();
+
   ctx.restore();
 }
 
@@ -2886,8 +3123,10 @@ function drawEnemies() {
       ctx.fillRect(-20, -3, 8, 10);
       ctx.fillRect(12, -3, 8, 10);
 
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(-4, -7, 8, 14);
+      if (e.warn <= 0) {
+        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.fillRect(-4, -7, 8, 14);
+      }
 
       if (e.warn > 0) {
         ctx.strokeStyle = "rgba(255,255,255,0.8)";
@@ -3057,7 +3296,6 @@ function drawBoss() {
   }
 
   const hpPct = b.hp / b.maxHp;
-  const flash = b.warn > 0 && Math.floor(state.frame / 3) % 2 === 0;
   const open = b.pending === "spawn" && b.warnMax > 0 ? b.mouthOpen : 0;
   const mouthEase = easeOutCubic(open);
   const bob = Math.sin(state.frame * 0.05 + b.step) * 1.4;
@@ -3322,17 +3560,32 @@ function drawTopLeftHUD() {
   ctx.strokeRect(x, energyY, barW, 8);
 
   if (state.devStatsVisible) {
-    ctx.fillStyle = "rgba(255,255,255,0.78)";
-    ctx.font = "12px Arial";
     const lines = [
       `Phase: ${state.phase}`,
+      `Mood: ${state.waveMood}`,
+      `Intensity: ${state.intensityPhase}`,
       `Threat: ${state.difficulty.threat.toFixed(2)}`,
+      `Target: ${state.difficulty.target.toFixed(2)}`,
       `Pressure: ${Math.round(state.pressure)}`,
+      `Pacing: ${state.difficulty.pacingMemory.toFixed(2)}`,
       `Heat: ${state.difficulty.heatStreak ? "ON" : "OFF"}`,
-      `Drops: ${state.killsSinceLastDrop}`
+      `Drops: ${state.killsSinceLastDrop}`,
+      `Wave: ${state.waveTimer}`,
+      `Template: ${state.lastWaveTemplateName || "-"}`,
+      `Shots: ${state.difficulty.shotsFired}/${state.difficulty.shotsHit}`,
+      `Enemies: ${state.enemies.length}`,
+      `Bullets: ${state.enemyBullets.length}`,
+      `Boss: ${state.boss ? state.boss.mode : "-"}`,
+      `PhaseTimer: ${state.phaseTimer}`
     ];
+
+    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.font = "11px Arial";
+    ctx.textBaseline = "top";
+
+    const startY = energyY + 14;
     for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], x, energyY + 16 + i * 14);
+      ctx.fillText(lines[i], x, startY + i * 13);
     }
   }
 }
@@ -3547,6 +3800,9 @@ function setupSession(mode = "start") {
   state.lastBossMode = null;
   state.intensityPhase = "normal";
   state.intensityTimer = 180;
+  state.waveMood = "open";
+  state.waveMoodTimer = 120;
+  state.lastWaveTemplateName = null;
   state.difficulty.threat = 0.75;
   state.difficulty.target = 0.75;
   state.difficulty.grace = 0;
@@ -3555,6 +3811,9 @@ function setupSession(mode = "start") {
   state.difficulty.lastHitFrame = -999;
   state.difficulty.killStreak = 0;
   state.difficulty.burst = 0;
+  state.difficulty.shotsFired = 0;
+  state.difficulty.shotsHit = 0;
+  state.difficulty.pacingMemory = 0;
   state.playerRealm = 0;
   state.devStatsVisible = false;
   state.gameState = mode;
@@ -3622,7 +3881,6 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  activePointerId = e.pointerId;
   canvas.setPointerCapture(e.pointerId);
 
   if (onActionZone(x, y)) {
@@ -3671,8 +3929,6 @@ function endPointer(e) {
     state.joystick.ax = 0;
     state.joystick.ay = 0;
   }
-
-  if (activePointerId === e.pointerId) activePointerId = null;
 }
 
 canvas.addEventListener("pointerup", endPointer);
