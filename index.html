@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Sky Raid Dynamic Plus v6.39</title>
+<title>Sky Raid Dynamic Plus v6.42</title>
 <style>
   html, body {
     margin: 0;
@@ -23,27 +23,6 @@
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-
-if (!ctx.roundRect) {
-  ctx.roundRect = function(x, y, w, h, r = 0) {
-    const radius = Array.isArray(r) ? r : [r, r, r, r];
-    const clampR = (v) => Math.max(0, Math.min(v || 0, Math.abs(w) / 2, Math.abs(h) / 2));
-    const tl = clampR(radius[0]);
-    const tr = clampR(radius[1]);
-    const br = clampR(radius[2]);
-    const bl = clampR(radius[3]);
-    this.moveTo(x + tl, y);
-    this.lineTo(x + w - tr, y);
-    this.arcTo(x + w, y, x + w, y + tr, tr);
-    this.lineTo(x + w, y + h - br);
-    this.arcTo(x + w, y + h, x + w - br, y + h, br);
-    this.lineTo(x + bl, y + h);
-    this.arcTo(x, y + h, x, y + h - bl, bl);
-    this.lineTo(x, y + tl);
-    this.arcTo(x, y, x + tl, y, tl);
-    this.closePath();
-  };
-}
 
 let W = 0, H = 0;
 let devSkipCooldown = 0;
@@ -199,8 +178,10 @@ function enemyBulletBudget() {
   if (state.difficulty.ghostGrace > 0) base -= 1.2;
   if (state.boss) base -= 1.5;
   base -= state.difficulty.burst * 3.5;
+
   if (state.intensityPhase === "surge") base += 2.0;
   if (state.intensityPhase === "cooldown") base -= 1.3;
+
   return clamp(base * state.difficulty.threat, 8, 26);
 }
 
@@ -551,7 +532,6 @@ function fireWingman(w) {
     kind: getPlayerShotKind(),
     realm: state.playerRealm
   });
-  state.difficulty.shotsFired += 1;
   w.fire = 18;
 }
 
@@ -887,10 +867,6 @@ function updateDifficulty() {
   if (state.intensityPhase === "surge") target += 0.06;
   if (state.intensityPhase === "cooldown") target -= 0.05;
 
-  if (state.phase >= 5 && sinceHit > 900 && p.hp === p.maxHp && state.waveMood !== "recovery") {
-    target += 0.06;
-  }
-
   d.target = clamp(target, 0.70, 1.45);
 
   let lerp = 0.025;
@@ -1122,7 +1098,9 @@ function selectWaveTemplate() {
       : [["redWall", 3], ["orangeRibbon", 3], ["purpleGuard", 4], ["splitAmbush", 4], ["orangeChain", 2], ["orangeSlash", 3]];
   } else if (mood === "rule") {
     if (state.phase >= 5) {
-      pool = phaseTier === "mid"
+      pool = phaseTier === "early"
+        ? [["phantomProbe", 5], ["phantomPair", 4], ["breather", 2], ["mixedChevron", 2]]
+        : phaseTier === "mid"
         ? [["phantomProbe", 4], ["phantomPair", 4], ["phantomFan", 3], ["mixedChevron", 2], ["purpleGuard", 2]]
         : [["phantomProbe", 3], ["phantomPair", 4], ["phantomFan", 4], ["purpleGuard", 2], ["splitAmbush", 2]];
     } else {
@@ -2776,6 +2754,27 @@ function drawPlayer() {
   const tilt = clamp(p.vx / 80, -0.06, 0.06);
   const bob = Math.sin(state.frame * 0.18 + p.x * 0.02) * 0.6;
 
+  function drawCockpit(styleMode) {
+    const c1 = styleMode === "normal" ? "rgba(255,255,255,0.95)" : styleMode === "ghost" ? "rgba(235,215,255,0.95)" : "rgba(235,250,255,0.95)";
+    const c2 = styleMode === "normal" ? "rgba(130,240,255,0.70)" : styleMode === "ghost" ? "rgba(210,170,255,0.62)" : "rgba(130,240,255,0.62)";
+    const c3 = styleMode === "normal" ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.25)";
+
+    ctx.fillStyle = c1;
+    ctx.beginPath();
+    ctx.ellipse(0, -3, 4.6, 8.3, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = c2;
+    ctx.beginPath();
+    ctx.ellipse(-0.5, -4.1, 2.0, 4.7, -0.16, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = c3;
+    ctx.beginPath();
+    ctx.ellipse(1.0, -6.1, 0.9, 2.1, -0.18, 0, TAU);
+    ctx.fill();
+  }
+
   if (isWraithActive()) {
     const normal = state.playerRealm === 0;
     ctx.save();
@@ -2795,7 +2794,7 @@ function drawPlayer() {
     ctx.fill();
 
     ctx.fillStyle = normal ? "#7fd7ff" : "rgba(240,220,255,0.85)";
-    ctx.fillRect(-4, -7, 8, 18);
+    drawCockpit(normal ? "normal" : "ghost");
 
     ctx.globalAlpha = normal ? 0.85 : 0.6;
     ctx.fillStyle = normal ? "rgba(140,220,255,0.8)" : "rgba(220,180,255,0.8)";
@@ -2834,7 +2833,7 @@ function drawPlayer() {
     ctx.fill();
 
     ctx.fillStyle = "#9ff";
-    ctx.fillRect(-4, -7, 8, 18);
+    drawCockpit("ghost");
     ctx.fillStyle = "rgba(150,255,255,0.9)";
     ctx.fillRect(-14, 4, 8, 4);
     ctx.fillRect(6, 4, 8, 4);
@@ -2861,7 +2860,7 @@ function drawPlayer() {
   ctx.fill();
 
   ctx.fillStyle = "#9ff";
-  ctx.fillRect(-4, -7, 8, 18);
+  drawCockpit("normal");
   ctx.fillStyle = "rgba(130,255,240,0.9)";
   ctx.fillRect(-14, 5, 8, 4);
   ctx.fillRect(6, 5, 8, 4);
@@ -2900,6 +2899,92 @@ function drawWingmen() {
     ctx.restore();
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
+  }
+}
+
+function drawBullets() {
+  for (const b of state.bullets) {
+    if (b.kind === "ghost") {
+      ctx.save();
+      ctx.shadowColor = "rgba(220,190,255,0.9)";
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = "rgba(225,205,255,0.95)";
+      ctx.beginPath();
+      ctx.arc(b.x, b.y + 4, 3.4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(b.x - 2, b.y, 4, 10);
+      ctx.fillRect(b.x - 1, b.y - 2, 2, 2);
+    }
+  }
+
+  for (const b of state.enemyBullets) {
+    if (b.kind === "boss") {
+      ctx.fillStyle = "#ff5";
+      ctx.fillRect(b.x - 3, b.y, 6, 10);
+    } else if (b.kind === "aimed") {
+      ctx.fillStyle = "#f9f";
+      ctx.fillRect(b.x - 3, b.y, 6, 10);
+    } else if (b.kind === "phantomShot") {
+      ctx.fillStyle = "#0ff";
+      ctx.fillRect(b.x - 3, b.y, 6, 10);
+    } else if (b.kind === "purple") {
+      ctx.fillStyle = "#fc5";
+      ctx.fillRect(b.x - 3, b.y, 6, 10);
+    } else if (b.kind === "wraithPhysical" || b.kind === "wraithGhost") {
+      ctx.save();
+
+      if (b.trail && b.trail.length > 1) {
+        for (let i = 1; i < b.trail.length; i++) {
+          const a = b.trail[i - 1];
+          const c = b.trail[i];
+          const alpha = (i / b.trail.length) * 0.35;
+          ctx.strokeStyle = b.kind === "wraithPhysical" ? `rgba(255,255,255,${alpha})` : `rgba(220,180,255,${alpha})`;
+          ctx.lineWidth = i < b.trail.length - 2 ? 2 : 3;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.stroke();
+        }
+      }
+
+      if (b.kind === "wraithPhysical") {
+        const wrongRealm = state.boss && state.boss.mode === "wraith" && b.realm !== state.playerRealm;
+        ctx.globalAlpha = wrongRealm ? 0.35 : 0.98;
+        ctx.fillStyle = wrongRealm ? "rgba(220,230,255,0.70)" : "rgba(255,255,255,0.98)";
+        ctx.fillRect(b.x - 4, b.y - 2, 8, 10);
+        ctx.fillRect(b.x - 2, b.y - 4, 4, 14);
+
+        if (wrongRealm) {
+          ctx.strokeStyle = "rgba(255,255,255,0.22)";
+          ctx.strokeRect(b.x - 5, b.y - 3, 10, 16);
+        }
+      } else {
+        ctx.shadowColor = "rgba(220,170,255,0.9)";
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = "rgba(220,180,255,0.88)";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 4.5, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.restore();
+
+      if (state.boss && state.boss.mode === "wraith" && b.kind === "wraithGhost" && state.boss.hp / state.boss.maxHp <= 0.4 && b.realm !== state.playerRealm) {
+        ctx.save();
+        ctx.globalAlpha = 0.18;
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 6.8, 0, TAU);
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else {
+      ctx.fillStyle = "#fc5";
+      ctx.fillRect(b.x - 3, b.y, 6, 10);
+    }
   }
 }
 
@@ -2945,6 +3030,21 @@ function drawEnemyFlame(yOffset, width, height, phase, alpha = 0.42) {
   ctx.restore();
 }
 
+function drawFighterCanopy(alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.beginPath();
+  ctx.ellipse(0, -1, 4.2, 5.8, 0, 0, TAU);
+  ctx.fill();
+  ctx.globalAlpha = alpha * 0.4;
+  ctx.fillStyle = "rgba(120,200,255,0.9)";
+  ctx.beginPath();
+  ctx.ellipse(-0.7, -2.2, 1.6, 2.1, -0.2, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawEnemies() {
   for (const e of state.enemies) {
     const scale = 1 + Math.min(0.12, (e.hitPulse || 0) * 0.08);
@@ -2957,8 +3057,8 @@ function drawEnemies() {
     const dy = e.y - (e.prevY || e.y);
     const bank = clamp(dx * 0.06, -0.28, 0.28);
     const sway = Math.sin(state.frame * 0.10 + e.loopPhase) * 0.05;
-    ctx.rotate(bank + sway);
 
+    ctx.rotate(bank + sway);
     if (!e.escape) ctx.scale(1, -1);
 
     if (e.type === "red") {
@@ -2972,111 +3072,91 @@ function drawEnemies() {
 
       ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.moveTo(0, -15);
-      ctx.lineTo(-10, -7);
-      ctx.lineTo(-13, 5);
-      ctx.lineTo(-6, 14);
-      ctx.lineTo(0, 16);
-      ctx.lineTo(6, 14);
-      ctx.lineTo(13, 5);
-      ctx.lineTo(10, -7);
+      ctx.moveTo(0, -14);
+      ctx.lineTo(-12, 6);
+      ctx.lineTo(0, 12);
+      ctx.lineTo(12, 6);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = wing;
       ctx.beginPath();
-      ctx.moveTo(-9, -3);
-      ctx.lineTo(-22, 5);
-      ctx.lineTo(-10, 8);
+      ctx.moveTo(-12, 4);
+      ctx.lineTo(-20, 10);
+      ctx.lineTo(-9, 8);
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(9, -3);
-      ctx.lineTo(22, 5);
-      ctx.lineTo(10, 8);
+      ctx.moveTo(12, 4);
+      ctx.lineTo(20, 10);
+      ctx.lineTo(9, 8);
       ctx.fill();
 
       ctx.fillStyle = core;
-      ctx.beginPath();
-      ctx.ellipse(0, -1, 3.2, 6.5, 0, 0, TAU);
-      ctx.fill();
-
+      drawFighterCanopy(0.95);
       ctx.fillStyle = mixHex("#b22", "#ffbdbd", hitMix * 0.22);
-      ctx.beginPath();
-      ctx.moveTo(-3, 15);
-      ctx.lineTo(3, 15);
-      ctx.lineTo(1, 19);
-      ctx.lineTo(-1, 19);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(-4, 8, 8, 3);
 
       ctx.fillStyle = "rgba(255,240,220,0.85)";
-      ctx.beginPath();
-      ctx.moveTo(0, 19);
-      ctx.lineTo(-1.6, 24 + Math.sin(state.frame * 0.35 + e.loopPhase) * 1.0);
-      ctx.lineTo(1.6, 24 + Math.sin(state.frame * 0.35 + e.loopPhase) * 1.0);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(-2, 12, 4, 4);
 
-      drawEnemyFlame(19, 7, 8, e.loopPhase, 0.48);
+      drawEnemyFlame(13, 6, 6, e.loopPhase, 0.45);
     } else if (e.type === "orange") {
       const body = mixHex("#f93", "#ffd39b", hitMix * 0.25);
       const canopy = mixHex("#fff", "#fff0da", hitMix * 0.18);
+      const wing = mixHex("#ffb25a", "#ffe1b8", hitMix * 0.18);
+
       ctx.shadowColor = `rgba(255,170,90,${0.12 + hitMix * 0.08})`;
       ctx.shadowBlur = 6;
 
       ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.moveTo(0, -13);
-      ctx.lineTo(-6, -6);
-      ctx.lineTo(-5, 8);
-      ctx.lineTo(0, 16);
-      ctx.lineTo(5, 8);
-      ctx.lineTo(6, -6);
+      ctx.moveTo(0, -12);
+      ctx.lineTo(-8, -2);
+      ctx.lineTo(-6, 12);
+      ctx.lineTo(6, 12);
+      ctx.lineTo(8, -2);
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = mixHex("#c60", "#ffcc80", hitMix * 0.22);
+      // front set moved back so it touches the rear set cleanly
+      ctx.fillStyle = wing;
       ctx.beginPath();
-      ctx.moveTo(-2, -4);
-      ctx.lineTo(-20, -16);
-      ctx.lineTo(-16, -9);
-      ctx.lineTo(-6, -1);
+      ctx.moveTo(-1, 5);
+      ctx.lineTo(-14, -1);
+      ctx.lineTo(-10, 4);
+      ctx.lineTo(-4, 3);
       ctx.closePath();
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(2, -4);
-      ctx.lineTo(20, -16);
-      ctx.lineTo(16, -9);
-      ctx.lineTo(6, -1);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = mixHex("#c60", "#ffcc80", hitMix * 0.22);
-      ctx.beginPath();
-      ctx.moveTo(-2, 4);
-      ctx.lineTo(-20, 16);
-      ctx.lineTo(-16, 9);
-      ctx.lineTo(-6, 1);
+      ctx.moveTo(1, 5);
+      ctx.lineTo(14, -1);
+      ctx.lineTo(10, 4);
+      ctx.lineTo(4, 3);
       ctx.closePath();
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(2, 4);
-      ctx.lineTo(20, 16);
-      ctx.lineTo(16, 9);
-      ctx.lineTo(6, 1);
+      ctx.moveTo(-1, 7);
+      ctx.lineTo(-14, 13);
+      ctx.lineTo(-10, 8);
+      ctx.lineTo(-4, 9);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(1, 7);
+      ctx.lineTo(14, 13);
+      ctx.lineTo(10, 8);
+      ctx.lineTo(4, 9);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = canopy;
+      drawFighterCanopy(0.95);
+      ctx.fillStyle = mixHex("#a50", "#ffe5bf", hitMix * 0.18);
       ctx.beginPath();
-      ctx.ellipse(0, -1, 2.6, 5.8, 0, 0, TAU);
+      ctx.ellipse(0, 11, 1.8, 2.2, 0, 0, TAU);
       ctx.fill();
 
-      ctx.fillStyle = mixHex("#a50", "#ffe5bf", hitMix * 0.18);
-      ctx.fillRect(-1.7, 16, 1.8, 4);
-      ctx.fillRect(0.2, 16, 1.8, 4);
-
-      drawEnemyFlame(20, 6, 7, e.loopPhase, 0.44);
+      drawEnemyFlame(12, 6, 5, e.loopPhase, 0.42);
     } else if (e.type === "purple") {
       const body = mixHex("#b4f", "#d7c4ff", hitMix * 0.20);
       const side = mixHex("#7213b0", "#f0ddff", hitMix * 0.18);
@@ -3087,34 +3167,23 @@ function drawEnemies() {
       ctx.fillStyle = body;
       ctx.beginPath();
       ctx.moveTo(0, -18);
-      ctx.lineTo(-11, -9);
-      ctx.lineTo(-14, 2);
+      ctx.lineTo(-14, -4);
       ctx.lineTo(-10, 12);
-      ctx.lineTo(0, 15);
       ctx.lineTo(10, 12);
-      ctx.lineTo(14, 2);
-      ctx.lineTo(11, -9);
+      ctx.lineTo(14, -4);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = side;
-      ctx.beginPath();
-      ctx.moveTo(-12, -4);
-      ctx.lineTo(-23, 0);
-      ctx.lineTo(-12, 5);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(12, -4);
-      ctx.lineTo(23, 0);
-      ctx.lineTo(12, 5);
-      ctx.fill();
+      ctx.fillRect(-20, -3, 8, 10);
+      ctx.fillRect(12, -3, 8, 10);
 
-      if (e.warn <= 0) {
-        ctx.fillStyle = "rgba(255,255,255,0.12)";
-        ctx.beginPath();
-        ctx.ellipse(0, -1, 2.7, 6.2, 0, 0, TAU);
-        ctx.fill();
-      }
+      ctx.fillStyle = "rgba(255,255,255,0.90)";
+      drawFighterCanopy(0.95);
+      ctx.fillStyle = mixHex("#d8f6ff", "#ffffff", hitMix * 0.14);
+      ctx.beginPath();
+      ctx.ellipse(0, 12, 2.0, 2.8, 0, 0, TAU);
+      ctx.fill();
 
       if (e.warn > 0) {
         ctx.strokeStyle = "rgba(255,255,255,0.8)";
@@ -3123,7 +3192,7 @@ function drawEnemies() {
         ctx.stroke();
       }
 
-      drawEnemyFlame(17, 5, 7, e.loopPhase, 0.34);
+      drawEnemyFlame(16, 5, 7, e.loopPhase, 0.34);
     } else if (e.type === "phantom") {
       const alpha = e.telegraphTimer > 0 ? (0.42 + Math.sin((state.frame + e.flickerSeed) * 0.8) * 0.22) : (e.stateMode === "ghost" ? 0.42 : 1);
       ctx.globalAlpha = alpha;
@@ -3134,22 +3203,18 @@ function drawEnemies() {
       ctx.fillStyle = body;
       ctx.beginPath();
       ctx.moveTo(0, -16);
-      ctx.lineTo(-11, -10);
-      ctx.lineTo(-15, 0);
-      ctx.lineTo(-11, 12);
+      ctx.lineTo(-12, -8);
+      ctx.lineTo(-14, 8);
       ctx.lineTo(0, 15);
-      ctx.lineTo(11, 12);
-      ctx.lineTo(15, 0);
-      ctx.lineTo(11, -10);
+      ctx.lineTo(14, 8);
+      ctx.lineTo(12, -8);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = e.stateMode === "ghost" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.28)";
-      ctx.beginPath();
-      ctx.ellipse(0, -1, 2.8, 6.2, 0, 0, TAU);
-      ctx.fill();
+      ctx.fillRect(-7, -10, 14, 20);
       ctx.fillStyle = mixHex("#00d0d0", "#efffff", hitMix * 0.18);
-      ctx.fillRect(-15, -2, 30, 4);
+      ctx.fillRect(-16, -2, 32, 4);
 
       drawEnemyFlame(14, 6, 5, e.loopPhase, 0.30);
 
@@ -3198,77 +3263,58 @@ function drawBoss() {
     ctx.shadowColor = realmGlow;
     ctx.shadowBlur = b.chargeTelegraph > 0 ? 24 : 16;
 
-    ctx.fillStyle = b.realm === 0 ? "rgba(230,245,255,0.92)" : "rgba(225,200,255,0.88)";
+    ctx.fillStyle = b.realm === 0 ? "rgba(230,245,255,0.90)" : "rgba(225,200,255,0.86)";
     ctx.beginPath();
-    ctx.moveTo(0, -34);
-    ctx.lineTo(-62, -22);
-    ctx.lineTo(-74, -4);
-    ctx.lineTo(-62, 18);
-    ctx.lineTo(0, 36);
-    ctx.lineTo(62, 18);
-    ctx.lineTo(74, -4);
-    ctx.lineTo(62, -22);
-    ctx.closePath();
+    ctx.ellipse(0, 0, 70, 30, 0, 0, TAU);
     ctx.fill();
 
-    ctx.fillStyle = b.realm === 0 ? "rgba(200,225,245,0.85)" : "rgba(210,185,245,0.82)";
+    ctx.globalAlpha *= 0.9;
+    ctx.fillStyle = b.realm === 0 ? "rgba(180,220,255,0.65)" : "rgba(200,160,255,0.58)";
     ctx.beginPath();
-    ctx.moveTo(0, -22);
-    ctx.lineTo(-42, -12);
-    ctx.lineTo(-48, 6);
-    ctx.lineTo(0, 22);
-    ctx.lineTo(48, 6);
-    ctx.lineTo(42, -12);
+    ctx.ellipse(0, 2, 52, 18, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(-28, -2, 12, 6, 0, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(28, -2, 12, 6, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = b.realm === 0 ? "rgba(120,190,255,0.82)" : "rgba(180,125,245,0.80)";
+    ctx.beginPath();
+    ctx.moveTo(0, -34);
+    ctx.lineTo(-16, -14);
+    ctx.lineTo(16, -14);
     ctx.closePath();
     ctx.fill();
 
     ctx.fillStyle = "rgba(0,0,0,0.20)";
     ctx.beginPath();
-    ctx.roundRect(-78, -10, 28, 18, 6);
+    ctx.ellipse(-44, 10, 14, 8, 0.2, 0, TAU);
     ctx.fill();
     ctx.beginPath();
-    ctx.roundRect(50, -10, 28, 18, 6);
-    ctx.fill();
-
-    ctx.fillStyle = b.realm === 0 ? "rgba(160,205,255,0.90)" : "rgba(190,150,255,0.88)";
-    ctx.beginPath();
-    ctx.moveTo(-18, -30);
-    ctx.lineTo(-34, -18);
-    ctx.lineTo(-16, -16);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(18, -30);
-    ctx.lineTo(34, -18);
-    ctx.lineTo(16, -16);
-    ctx.closePath();
+    ctx.ellipse(44, 10, 14, 8, -0.2, 0, TAU);
     ctx.fill();
 
     const coreGlow = 0.6 + Math.sin(state.frame * 0.18) * 0.2 + b.corePulse * 0.08;
     ctx.fillStyle = b.realm === 0 ? `rgba(170,220,255,${0.34 + coreGlow * 0.18})` : `rgba(200,150,255,${0.34 + coreGlow * 0.18})`;
     ctx.beginPath();
-    ctx.arc(0, 0, 18 + coreGlow * 4, 0, TAU);
+    ctx.arc(0, 2, 20 + coreGlow * 4, 0, TAU);
     ctx.fill();
-
-    ctx.fillStyle = b.realm === 0 ? "rgba(255,255,255,0.24)" : "rgba(255,255,255,0.18)";
-    ctx.beginPath();
-    ctx.ellipse(0, -6, 8, 14, 0, 0, TAU);
-    ctx.fill();
-
-    ctx.fillStyle = "rgba(0,0,0,0.22)";
-    ctx.fillRect(-22, 18, 44, 8);
 
     ctx.strokeStyle = realmColor;
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(0, 0, 52 * chargePulse, 0, TAU);
+    ctx.arc(0, 2, 52 * chargePulse, 0, TAU);
     ctx.stroke();
 
     if (b.chargeTelegraph > 0) {
       ctx.strokeStyle = "rgba(255,255,255,0.72)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(0, 0, 62 + Math.sin(state.frame * 0.2) * 2, 0, TAU);
+      ctx.arc(0, 2, 65 + Math.sin(state.frame * 0.2) * 2, 0, TAU);
       ctx.stroke();
     }
 
@@ -3276,36 +3322,24 @@ function drawBoss() {
       ctx.strokeStyle = b.nextRealm === 0 ? "rgba(200,235,255,0.65)" : "rgba(210,170,255,0.65)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(0, 0, 66 + Math.sin(state.frame * 0.3) * 2, 0, TAU);
+      ctx.arc(0, 2, 70 + Math.sin(state.frame * 0.3) * 2, 0, TAU);
       ctx.stroke();
     }
 
-    ctx.fillStyle = b.realm === 0 ? "rgba(120,190,255,0.65)" : "rgba(160,120,240,0.62)";
-    ctx.beginPath();
-    ctx.moveTo(-36, 28);
-    ctx.lineTo(-24, 42);
-    ctx.lineTo(-14, 28);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(36, 28);
-    ctx.lineTo(24, 42);
-    ctx.lineTo(14, 28);
-    ctx.closePath();
-    ctx.fill();
+    drawEnemyFlame(26, 14, 11, b.movePhase, (0.55 + (1 - hpPct) * 0.12) * 0.35);
 
     ctx.restore();
 
-    for (let i = 0; i < 3; i++) {
-      const ang = state.frame * 0.05 + i * 2.1;
-      const r = 56 + Math.sin(state.frame * 0.04 + i) * 4;
+    for (let i = 0; i < 4; i++) {
+      const ang = state.frame * 0.05 + i * 1.5;
+      const r = 62 + Math.sin(state.frame * 0.04 + i) * 4;
       const px = b.x + Math.cos(ang) * r;
       const py = b.y + Math.sin(ang) * 8 + wobble;
       ctx.save();
-      ctx.globalAlpha = 0.24;
+      ctx.globalAlpha = 0.22;
       ctx.strokeStyle = i === 0 ? "rgba(200,235,255,0.8)" : i === 1 ? "rgba(200,170,255,0.8)" : "rgba(255,255,255,0.6)";
       ctx.beginPath();
-      ctx.arc(px, py, 6 + (i % 2) * 2, 0, TAU);
+      ctx.arc(px, py, 5 + (i % 2) * 2, 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
@@ -3343,103 +3377,108 @@ function drawBoss() {
   ctx.shadowColor = "rgba(120,255,255,0.25)";
   ctx.shadowBlur = 12;
 
-  ctx.fillStyle = "#6ff";
+  ctx.fillStyle = "#62f";
   ctx.beginPath();
-  ctx.moveTo(0, -34);
-  ctx.lineTo(-58, -20);
-  ctx.lineTo(-84, -2);
-  ctx.lineTo(-66, 18);
-  ctx.lineTo(-24, 30);
-  ctx.lineTo(0, 34);
-  ctx.lineTo(24, 30);
-  ctx.lineTo(66, 18);
-  ctx.lineTo(84, -2);
-  ctx.lineTo(58, -20);
-  ctx.closePath();
+  ctx.ellipse(0, 0, 82, 30, 0, 0, TAU);
   ctx.fill();
 
-  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillStyle = "#8ff";
+  ctx.globalAlpha = 0.95;
   ctx.beginPath();
-  ctx.moveTo(0, -18);
-  ctx.lineTo(-40, -10);
-  ctx.lineTo(-50, 8);
-  ctx.lineTo(0, 22);
-  ctx.lineTo(50, 8);
-  ctx.lineTo(40, -10);
-  ctx.closePath();
+  ctx.ellipse(0, -6, 52, 18, 0, 0, TAU);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = "#0a4";
+  ctx.beginPath();
+  ctx.ellipse(-54, 2, 20, 12, -0.12, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(54, 2, 20, 12, 0.12, 0, TAU);
   ctx.fill();
 
-  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.fillStyle = "#3ff";
   ctx.beginPath();
-  ctx.roundRect(-82, -10, 26, 18, 5);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.roundRect(56, -10, 26, 18, 5);
+  ctx.moveTo(0, -42);
+  ctx.lineTo(-18, -16);
+  ctx.lineTo(18, -16);
+  ctx.closePath();
   ctx.fill();
 
   ctx.fillStyle = "#044";
   ctx.beginPath();
-  ctx.ellipse(0, -4, 10, 16, 0, 0, TAU);
-  ctx.fill();
-
-  ctx.fillStyle = "#033";
-  ctx.beginPath();
-  ctx.roundRect(-22, -6, 12, 12, 3);
+  ctx.ellipse(-20, -3, 14, 7, -0.2, 0, TAU);
   ctx.fill();
   ctx.beginPath();
-  ctx.roundRect(10, -6, 12, 12, 3);
+  ctx.ellipse(20, -3, 14, 7, 0.2, 0, TAU);
   ctx.fill();
 
-  ctx.fillStyle = "#9ff";
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
-  ctx.arc(0, 4, 14, 0, TAU);
+  ctx.roundRect(-28, 8, 56, 10, 4);
   ctx.fill();
 
-  ctx.fillStyle = "rgba(0,0,0,0.20)";
-  ctx.fillRect(-30, 24, 60, 8);
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 12, 16, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "rgba(120,255,220,0.75)";
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 7, 10, 0, 0, TAU);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255,255,255,0.16)";
+  ctx.beginPath();
+  ctx.roundRect(-62, -10, 24, 6, 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(38, -10, 24, 6, 2);
+  ctx.fill();
 
   if (b.pending === "spawn" && b.warn > 0) {
     const glow = 0.10 + mouthEase * 0.28;
     ctx.fillStyle = `rgba(255,255,255,${glow})`;
     ctx.beginPath();
-    ctx.arc(0, -1, 32, 0, TAU);
+    ctx.ellipse(0, 0, 70, 26, 0, 0, TAU);
     ctx.fill();
 
-    ctx.strokeStyle = `rgba(255,255,255,${0.18 + mouthEase * 0.28})`;
-    ctx.lineWidth = 2;
+    ctx.fillStyle = `rgba(255,255,255,${0.16 + mouthEase * 0.38})`;
     ctx.beginPath();
-    ctx.arc(0, 0, 42 + mouthEase * 10, 0, TAU);
-    ctx.stroke();
+    ctx.ellipse(0, 0, 48, 16, 0, 0, TAU);
+    ctx.fill();
 
-    ctx.fillStyle = "#033";
-    ctx.fillRect(-38 - mouthEase * 18, -18, 22, 18);
-    ctx.fillRect(16 + mouthEase * 18, -18, 22, 18);
+    for (let i = 0; i < 8; i++) {
+      const ang = state.frame * 0.14 + i * 0.78;
+      const r = 6 + (i % 3) * 3 + mouthEase * 10;
+      const px = Math.cos(ang) * r;
+      const py = Math.sin(ang * 1.4) * (r * 0.55);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(px, py, 2, 2);
+    }
   }
+
+  const corePulse = 0.75 + Math.sin(state.frame * 0.12) * 0.1;
+  ctx.fillStyle = "rgba(90,255,255,0.65)";
+  ctx.beginPath();
+  ctx.arc(0, 0, 16 + corePulse * 3, 0, TAU);
+  ctx.fill();
 
   const flame = 8 + Math.sin(state.frame * 0.24) * 2;
   ctx.fillStyle = "rgba(120,255,220,0.55)";
   ctx.beginPath();
-  ctx.moveTo(-26, 28);
-  ctx.lineTo(-20, 28 + flame);
-  ctx.lineTo(-14, 28);
+  ctx.moveTo(-36, 22);
+  ctx.lineTo(-30, 22 + flame);
+  ctx.lineTo(-24, 22);
   ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(26, 28);
-  ctx.lineTo(20, 28 + flame);
-  ctx.lineTo(14, 28);
-  ctx.fill();
-
-  ctx.fillStyle = "rgba(120,255,255,0.34)";
-  ctx.beginPath();
-  ctx.moveTo(-48, 16);
-  ctx.lineTo(-62, 28);
-  ctx.lineTo(-40, 22);
-  ctx.closePath();
+  ctx.moveTo(36, 22);
+  ctx.lineTo(30, 22 + flame);
+  ctx.lineTo(24, 22);
   ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(48, 16);
-  ctx.lineTo(62, 28);
-  ctx.lineTo(40, 22);
+  ctx.moveTo(0, 24);
+  ctx.lineTo(-4, 24 + flame * 1.1);
+  ctx.lineTo(4, 24 + flame * 1.1);
   ctx.closePath();
   ctx.fill();
 
